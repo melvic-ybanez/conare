@@ -23,14 +23,13 @@ class ContextualMacro(val c: whitebox.Context) {
 
   def environment = c.prefix.tree match {
     case q"new contextual[$tparam]" => c.enclosingClass.children match {
-      case Template(_, _, body) :: _ => body.find {
-        case q"type $typeName = (..$params)" if typeName.toString == tparam.toString => true
-        case _ => false
-      } map {
-        case q"type $typeName = (..$params)" => params.map {
-          case Ident(typ: TypeName) => typeToParam(typ)
-        }
-      } getOrElse {
+      case Template(_, _, body) :: _ => body.flatMap {
+        case q"type $typeName = (..$params)" if typeName.toString == tparam.toString =>
+          Some(params.map {
+            case Ident(typ: TypeName) => typeToParam(typ)
+          })
+        case _ => None
+      }.headOption getOrElse {
         c.abort(c.enclosingPosition, s"Could not find declaration: ${tparam.toString}")
       }
     }
