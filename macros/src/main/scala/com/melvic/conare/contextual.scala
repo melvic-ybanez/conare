@@ -1,4 +1,4 @@
-package com.melvic.contextual
+package com.melvic.conare
 
 import scala.annotation.{StaticAnnotation, compileTimeOnly}
 import language.experimental.macros

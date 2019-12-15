@@ -1,5 +1,5 @@
 package com.melvic
 
-package object contextual {
+package object conare {
   def Env[A](implicit a: A): A = a
 }
