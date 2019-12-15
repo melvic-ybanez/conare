@@ -1,5 +1,22 @@
-name := "contextual"
+lazy val commonSettings = Seq(
+  scalaVersion := "2.12.9",
+  organization := "com.melvic",
+  resolvers += Resolver.sonatypeRepo("releases"),
+  addCompilerPlugin("org.scalamacros" % "paradise" % "2.1.1" cross CrossVersion.full)
+)
 
-version := "0.1"
+lazy val scalaReflect = Def.setting { "org.scala-lang" % "scala-reflect" % scalaVersion.value }
 
-scalaVersion := "2.13.1"
+lazy val core = (project in file("core"))
+  .dependsOn(macros)
+  .settings(
+    commonSettings,
+    // other settings here
+  )
+
+lazy val macros = (project in file("macros"))
+  .settings(
+    commonSettings,
+    libraryDependencies += scalaReflect.value
+    // other settings here
+  )
