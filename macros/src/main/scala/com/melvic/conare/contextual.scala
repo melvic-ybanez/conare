@@ -13,7 +13,7 @@ class ContextualMacro(val c: whitebox.Context) {
   import c.universe._
 
   def impl[A](annottees: c.Expr[Any]*): c.Expr[Any] = {
-    val tree = annottees.map(_.tree) match {  /*_*/
+    val tree = annottees.map(_.tree) match {   /*_*/
       case q"$mod def $func[..$tparams](...$params): $ret = $body" :: _ =>
         val (paramsDecl, envRet) = environment
         val retTree = constructReturnType(envRet, ret)
@@ -33,11 +33,16 @@ class ContextualMacro(val c: whitebox.Context) {
           case q"type $typeName = (..$params) => $ret" if correctTypeName(typeName) =>
             Some(constructTermParams(params), ret)
           case q"type $typeName = (..$params)" if correctTypeName(typeName) =>
-            c.abort(c.enclosingPosition, s"Params No Func: $params")
             Some((constructTermParams(params), EmptyTree))
           case _ => None
         }.headOption getOrElse {
-          c.abort(c.enclosingPosition, s"Could not find declaration: ${tparam.toString}")
+          // Could not find declaration. Deconstruct the type directly
+          // and construct a new env param from it.
+          tparam match {
+            case tq"(..$tparams) => $ret" => (constructTermParams(tparams), ret)
+            case tq"(..$tparams)" => (constructTermParams(tparams), EmptyTree)
+            case q"$tparam" => (constructTermParams(List(tparam)), EmptyTree)
+          }
         }
       }   /*_*/
 
@@ -45,6 +50,9 @@ class ContextualMacro(val c: whitebox.Context) {
       s"Expected Type Param: type declaration (e.g. type Foo = (Bar, Baz)). Got $expr")
   }
 
+  /**
+   * Constructs the declarations of the parameters.
+   */
   def constructTermParams(params: List[Tree]) = params.map {
     case Ident(typeName: TypeName) =>
       val paramName = typeName.decodedName.toString
@@ -55,6 +63,11 @@ class ContextualMacro(val c: whitebox.Context) {
   def constructReturnType: (Tree, Tree) => Tree = {
     case (EmptyTree, ret) => ret
     case (envRet, ret) if ret.isEmpty => envRet
+
+    // If both the environment and the annottee's return types
+    // are provide, construct a new function where the two of
+    // them are the edges, turning the annottee into a curried
+    // function.
     case (envRet, funcRet) => tq"$envRet => $funcRet"
   }
 }
