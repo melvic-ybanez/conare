@@ -30,10 +30,11 @@ class ContextualMacro(val c: whitebox.Context) {
 
       c.enclosingClass.children match {   /*_*/
         case Template(_, _, body) :: _ => body.flatMap {
-          case q"type $typeName = (..$params)" if correctTypeName(typeName) =>
-            Some((constructTermParams(params), EmptyTree))
           case q"type $typeName = (..$params) => $ret" if correctTypeName(typeName) =>
             Some(constructTermParams(params), ret)
+          case q"type $typeName = (..$params)" if correctTypeName(typeName) =>
+            c.abort(c.enclosingPosition, s"Params No Func: $params")
+            Some((constructTermParams(params), EmptyTree))
           case _ => None
         }.headOption getOrElse {
           c.abort(c.enclosingPosition, s"Could not find declaration: ${tparam.toString}")
@@ -53,7 +54,7 @@ class ContextualMacro(val c: whitebox.Context) {
 
   def constructReturnType: (Tree, Tree) => Tree = {
     case (EmptyTree, ret) => ret
-    case (ret, EmptyTree) => ret
+    case (envRet, ret) if ret.isEmpty => envRet
     case (envRet, funcRet) => tq"$envRet => $funcRet"
   }
 }
