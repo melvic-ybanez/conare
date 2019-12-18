@@ -21,7 +21,7 @@ println(withStringAndIntEnvs)   // should print "String param: Hello. Integer pa
 
 The types of the generated implicit parameters are based on the types specified in the right-hand-side of the environment's definition. 
 
-More example:
+More examples:
 ```scala
   type FuncEnv = (Long, String) => String
   type TypeConsEnv[A] = (A, Int) => Int
