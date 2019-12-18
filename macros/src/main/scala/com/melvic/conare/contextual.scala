@@ -7,15 +7,16 @@ import scala.reflect.macros.whitebox
 /**
  * Generates implicit parameters for the annottee based on a given type.
  * If the macro can locate the definition of the input type, it will deconstruct
- * the right-hand-side of the definition and provide implicits for it. Otherwise,
- * an implicit parameter is generated for the type itself.
+ * the right-hand-side of the definition and provide implicits for the parts.
+ * Otherwise, an implicit parameter is generated for the type itself.
  *
  * Tuples are deconstructed into multiple parts (but not recursively) and implicits
  * are provided for each part.
  *
  * If the RHS of a definition is a function, or the type parameter itself is, its return
- * type might override the return type of the annottee unless the annottee explicitly
+ * type might override the return type of the annottee, unless the annottee explicitly
  * provides a return type, in which case a currying will occur.
+ *
  * @tparam A The type on which the generated environment is based.
  */
 @compileTimeOnly("enable macro paradise to expand macro annotations")
@@ -32,7 +33,8 @@ class ContextualMacro(val c: whitebox.Context) {
         val (paramsDecl, envRet) = environment
         val retTree = constructReturnType(envRet, ret)
         q"$mod def $func[..$tparams](...$params)(implicit ..$paramsDecl): $retTree = $body"
-      case expr => c.abort(c.enclosingPosition, s"Expected: function declaration. Got $expr")
+      case expr :: _ => c.abort(c.enclosingPosition,
+        s"Expected: Function or class declaration. Got $expr")
     }   /*_*/
 
     c.Expr(tree)
@@ -43,23 +45,26 @@ class ContextualMacro(val c: whitebox.Context) {
    * @return The parameter declarations together with the return type.
    */
   def environment = c.prefix.tree match {
-    case q"new contextual[$tparam]" =>
+    case q"new contextual[$tparam[..$a]]" =>
       def correctTypeName: TypeName => Boolean = _.toString == tparam.toString
 
       c.enclosingClass.children match {   /*_*/
         case Template(_, _, body) :: _ => body.flatMap {
-          case q"type $typeName = (..$params) => $ret" if correctTypeName(typeName) =>
-            Some(constructTermParams(params), ret)
-          case q"type $typeName = (..$params)" if correctTypeName(typeName) =>
-            Some((constructTermParams(params), EmptyTree))
+          case q"type $typeName[..$tps] = (..$params) => $ret" if correctTypeName(typeName) =>
+            Some(constructTermParams(params, tps, a), ret)
+          case q"type $typeName[..$tps] = (..$params)" if correctTypeName(typeName) =>
+            Some((constructTermParams(params, tps, a), EmptyTree))
           case _ => None
         }.headOption getOrElse {
           // Could not find declaration. Deconstruct the type directly
           // and construct a new env param from it.
-          tparam match {
-            case tq"(..$tparams) => $ret" => (constructTermParams(tparams), ret)
-            case tq"(..$tparams)" => (constructTermParams(tparams), EmptyTree)
-            case q"$tparam" => (constructTermParams(List(tparam)), EmptyTree)
+          tq"$tparam[..$a]" match {
+            case tq"(..$tparams) => $ret" =>
+              (constructTermParams(tparams, Nil, Nil), ret)
+            case tq"(..$tparams)" =>
+              (constructTermParams(tparams, Nil, Nil), EmptyTree)
+            case q"$tparam" =>
+              (constructTermParams(List(tparam), Nil, Nil), EmptyTree)
           }
         }
       }   /*_*/
@@ -71,11 +76,22 @@ class ContextualMacro(val c: whitebox.Context) {
   /**
    * Constructs the declarations of the parameters.
    */
-  def constructTermParams(params: List[Tree]) = params.map {
-    case Ident(typeName: TypeName) =>
-      val paramName = typeName.decodedName.toString
-      val termParam = TermName(paramName.head.toLower + paramName.tail)
-      q"$termParam: $typeName"
+  def constructTermParams(params: List[Tree], tparams: List[Tree], targs: List[Tree]) = {
+    lazy val paramsAndArgs = tparams zip targs
+    params.zipWithIndex.map {
+      case (Ident(typeName: TypeName), i) =>
+        val typeNameString = typeName.decodedName.toString
+        // Check if the type name is one of the environment's type params. If so,
+        // use the name of the corresponding argument. Otherwise, use the type's name.
+        val (paramName, resultType) = paramsAndArgs.find { case (tparam: TypeDef, _) =>
+          tparam.name.decodedName.toString == typeNameString
+        }.map {
+          case (_, Ident(targ: TypeName)) => (formatParamName(targ.toString) + i, targ)
+        } getOrElse (typeNameString, typeName)
+
+        val termParam = TermName(paramName)
+        q"$termParam: $resultType"
+    }
   }
 
   def constructReturnType: (Tree, Tree) => Tree = {
