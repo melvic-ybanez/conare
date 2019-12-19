@@ -81,13 +81,20 @@ class ContextualMacro(val c: whitebox.Context) {
     params map {
       case Ident(typeName: TypeName) =>
         val typeNameString = typeName.decodedName.toString
+        def noSubstitute = (formatParamName(typeNameString), typeName)
+
         // Check if the type name is one of the environment's type params. If so,
-        // use the name of the corresponding argument. Otherwise, use the type's name.
+        // use the name of the corresponding argument, unless the argument is a "skip"
+        // command (denoted by `~>`). Otherwise, use the type's name.
         val (paramName, resultType) = paramsAndArgs.find { case (tparam: TypeDef, _) =>
           tparam.name.decodedName.toString == typeNameString
         }.map {
-          case (_, Ident(targ: TypeName)) => (formatParamName(targ.toString), targ)
-        } getOrElse (typeNameString, typeName)
+          case (_, Ident(targ: TypeName)) =>
+            val targName = targ.decodedName.toString
+            val skipName = weakTypeOf[~>].typeSymbol.name.decodedName.toString
+            if (targName == skipName) noSubstitute
+            else (formatParamName(targName), targ)
+        } getOrElse noSubstitute
 
         val termParam = TermName(paramName)
         q"$termParam: $resultType"
