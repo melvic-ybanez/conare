@@ -78,15 +78,15 @@ class ContextualMacro(val c: whitebox.Context) {
    */
   def constructTermParams(params: List[Tree], tparams: List[Tree], targs: List[Tree]) = {
     lazy val paramsAndArgs = tparams zip targs
-    params.zipWithIndex.map {
-      case (Ident(typeName: TypeName), i) =>
+    params map {
+      case Ident(typeName: TypeName) =>
         val typeNameString = typeName.decodedName.toString
         // Check if the type name is one of the environment's type params. If so,
         // use the name of the corresponding argument. Otherwise, use the type's name.
         val (paramName, resultType) = paramsAndArgs.find { case (tparam: TypeDef, _) =>
           tparam.name.decodedName.toString == typeNameString
         }.map {
-          case (_, Ident(targ: TypeName)) => (formatParamName(targ.toString) + i, targ)
+          case (_, Ident(targ: TypeName)) => (formatParamName(targ.toString), targ)
         } getOrElse (typeNameString, typeName)
 
         val termParam = TermName(paramName)

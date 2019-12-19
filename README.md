@@ -1,4 +1,4 @@
-# conare
+# Conare
 A utility for simulating the functionality of Dotty's context queries.
 
 A simple example:
@@ -24,7 +24,7 @@ The types of the generated implicit parameters are based on the types specified 
 More examples:
 ```scala
   type FuncEnv = (Long, String) => String
-  type TypeConsEnv[A] = (A, Int) => Int
+  type TypeConsEnv[A] = (A, Int)
 
   // Function environments. The return type is specified in the environment.
   @contextual[FuncEnv]
@@ -32,7 +32,7 @@ More examples:
 
   // Type constructor
   @contextual[TypeConsEnv[String]]
-  def showTCEnv: String = s"String Param: ${Env[String]}. Integer is ${Env[Int]}. Param: $x"
+  def showTCEnv: String = s"String Param: ${Env[String]}. Integer is ${Env[Int]}."
 
   @contextual[String]
   def showString = s"Hello ${Env[String]}"
