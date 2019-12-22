@@ -54,6 +54,8 @@ class ContextualMacro(val c: whitebox.Context) {
             Some(constructTermParams(params, tps, a), ret)
           case q"type $typeName[..$tps] = (..$params)" if correctTypeName(typeName) =>
             Some((constructTermParams(params, tps, a), EmptyTree))
+          case q"case class $className(..$params)" if (correctTypeName(className)) =>
+            Some((params, EmptyTree))
           case _ => None
         }.headOption getOrElse {
           // Could not find declaration. Deconstruct the type directly
