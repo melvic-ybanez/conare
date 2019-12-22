@@ -10,6 +10,7 @@ lazy val scalaReflect = Def.setting { "org.scala-lang" % "scala-reflect" % scala
 
 lazy val root = (project in file("."))
   .aggregate(macros)
+  .settings(commonSettings)
 
 lazy val core = (project in file("core"))
   .dependsOn(macros)
