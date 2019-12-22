@@ -51,11 +51,23 @@ class ContextualMacro(val c: whitebox.Context) {
       c.enclosingClass.children match {   /*_*/
         case Template(_, _, body) :: _ => body.flatMap {
           case q"type $typeName[..$tps] = (..$params) => $ret" if correctTypeName(typeName) =>
-            Some(constructTermParams(params, tps, a), ret)
+            Some((constructTermParams(params, tps, a), ret))
           case q"type $typeName[..$tps] = (..$params)" if correctTypeName(typeName) =>
             Some((constructTermParams(params, tps, a), EmptyTree))
-          case q"case class $className(..$params)" if (correctTypeName(className)) =>
-            Some((params, EmptyTree))
+          case q"case class $className[..$tps](..$paramDecls)" if (correctTypeName(className)) =>
+            val params = paramDecls.map { case decl: ValDef => decl.tpt }
+            val newParamDecls = constructTermParams(params, tps, a, { targName =>
+              paramDecls.find { case decl: ValDef => decl.tpt match {
+                case Ident(tparam: TypeName) => tparam.decodedName.toString == targName
+                case tq"$typeCons[$tparam]" => tparam match { case ident: Ident =>
+                  ident.name.decodedName.toString == targName
+                }
+                case expr => error(expr, "Invalid param format")
+              }} map {
+                case decl: ValDef => decl.name.decodedName.toString
+              } getOrElse(lowerCamelFormat(targName))
+            })
+            Some((newParamDecls, EmptyTree))
           case _ => None
         }.headOption getOrElse {
           // Could not find declaration. Deconstruct the type directly
@@ -78,28 +90,45 @@ class ContextualMacro(val c: whitebox.Context) {
   /**
    * Constructs the declarations of the parameters.
    */
-  def constructTermParams(params: List[Tree], tparams: List[Tree], targs: List[Tree]) = {
+  def constructTermParams(params: List[Tree],
+      tparams: List[Tree],
+      targs: List[Tree],
+      formatName: String => String = lowerCamelFormat) = {
     lazy val paramsAndArgs = tparams zip targs
+
+    def construct(typeName: TypeName) = {
+      val typeNameString = typeName.decodedName.toString
+      def noSubstitute = (formatName(typeNameString), typeName)
+
+      // Check if the type name is one of the environment's type params. If so,
+      // use the name of the corresponding argument, unless the argument is a "skip"
+      // command (denoted by `~>`). Otherwise, use the type's name.
+      val (paramName, resultType) = paramsAndArgs.find { case (tparam: TypeDef, _) =>
+        tparam.name.decodedName.toString == typeNameString
+      }.map {
+        case (_, Ident(targ: TypeName)) =>
+          val targName = targ.decodedName.toString
+          val skipName = weakTypeOf[~>].typeSymbol.name.decodedName.toString
+          if (targName == skipName) noSubstitute
+          else (formatName(targName), targ)
+      } getOrElse noSubstitute
+
+      val termParam = TermName(paramName)
+      (termParam, resultType)
+    }
+
     params map {
       case Ident(typeName: TypeName) =>
-        val typeNameString = typeName.decodedName.toString
-        def noSubstitute = (formatParamName(typeNameString), typeName)
-
-        // Check if the type name is one of the environment's type params. If so,
-        // use the name of the corresponding argument, unless the argument is a "skip"
-        // command (denoted by `~>`). Otherwise, use the type's name.
-        val (paramName, resultType) = paramsAndArgs.find { case (tparam: TypeDef, _) =>
-          tparam.name.decodedName.toString == typeNameString
-        }.map {
-          case (_, Ident(targ: TypeName)) =>
-            val targName = targ.decodedName.toString
-            val skipName = weakTypeOf[~>].typeSymbol.name.decodedName.toString
-            if (targName == skipName) noSubstitute
-            else (formatParamName(targName), targ)
-        } getOrElse noSubstitute
-
-        val termParam = TermName(paramName)
+        val (termParam, resultType) = construct(typeName)
         q"$termParam: $resultType"
+      case tq"$tc[$tparam]" => tparam match {
+        case Ident(name: TypeName) =>
+          val (term @ TermName(paramName), resultType) = construct(name)
+          val tcName = lowerCamelFormat(name.decodedName.toString)
+          val tcTerm = TermName(s"${tcName}Of${paramName.capitalize}")
+          q"$tcTerm: $tc[$resultType]"
+      }
+      case expr => error(expr, "Invalid param format")
     }
   }
 
@@ -113,4 +142,10 @@ class ContextualMacro(val c: whitebox.Context) {
     // function.
     case (envRet, funcRet) => tq"$envRet => $funcRet"
   }
+
+  def lowerCamelFormat(paramName: String) =
+    paramName.head.toLower + paramName.tail
+
+  def error(expr: Tree, prefixMessage: String) =
+    c.abort(c.enclosingPosition, s"$prefixMessage: ${showRaw(expr)}")
 }
