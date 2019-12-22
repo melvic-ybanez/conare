@@ -11,12 +11,10 @@ lazy val core = (project in file("core"))
   .dependsOn(macros)
   .settings(
     commonSettings,
-    // other settings here
   )
 
 lazy val macros = (project in file("macros"))
   .settings(
     commonSettings,
     libraryDependencies += scalaReflect.value
-    // other settings here
   )
