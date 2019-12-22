@@ -2,6 +2,7 @@ lazy val commonSettings = Seq(
   scalaVersion := "2.12.9",
   organization := "com.melvic",
   resolvers += Resolver.sonatypeRepo("releases"),
+  publishTo := Some(Resolver.file("local-ivy", file("$HOME/.ivy2/local/core/"))),
   addCompilerPlugin("org.scalamacros" % "paradise" % "2.1.1" cross CrossVersion.full)
 )
 
