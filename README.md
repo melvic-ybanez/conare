@@ -26,9 +26,12 @@ More examples:
 type FuncEnv = (Long, String) => Int
 type TypeConsEnv[A] = (A, Int, List[A])
 type SkipEnv[A, B, C] = (A, B, C)
+type BiFunc[A, B] = (A, B)
+type BiFuncEnv[A, B] = (String, BiFunc[A, B])
 
 case class Person(name: String, age: Int)
 case class MyCons[A](head: A, tail: List[A])
+case class BiFuncCCEnv[A, B](key: String, envs: BiFunc[A, B])
 
 // Function environments. The return type is specified in the environment.
 @contextual[FuncEnv]
@@ -57,6 +60,18 @@ def showPersonParams = s"Name (String): $name. Age (Int): $age"
 
 @contextual[MyCons[String]]
 def showCons = s"Head: ${Env[String]}. Tail: ${Env[List[String]]}"
+
+@contextual[MyCons[~>]]
+def showConsSkip[A] = s"Cons Skipped: ${Env[List[A]]}"
+
+@contextual[BiFuncEnv[String, Int]]
+def showBiFuncEnv = s"Bi func env: ${Env[BiFunc[String, Int]]}"
+
+@contextual[BiFuncCCEnv[String, Int]]
+def showBiFuncCCEnv = s"Bi func cc env: ${Env[BiFunc[String, Int]]}"
+
+@contextual[BiFuncCCEnv[String, ~>]]
+def showBiFuncSkipped[B] = s"Bi func cc env skipped: ${Env[BiFunc[String, B]]}"
 
 @contextual[String]
 def showString = s"Hello ${Env[String]}"
