@@ -46,7 +46,7 @@ class ContextualMacro(val c: whitebox.Context) {
    */
   def environment = c.prefix.tree match {
     case q"new contextual[$tparam[..$a]]" =>
-      def correctTypeName: TypeName => Boolean = _.toString == tparam.toString
+      def correctTypeName: TypeName => Boolean = _.decodedName.toString == tparam.toString
 
       c.enclosingClass.children match {   /*_*/
         case Template(_, _, body) :: _ => body.flatMap {
@@ -54,8 +54,8 @@ class ContextualMacro(val c: whitebox.Context) {
             Some((constructTermParams(params, tps, a), ret))
           case q"type $typeName[..$tps] = (..$params)" if correctTypeName(typeName) =>
             Some((constructTermParams(params, tps, a), EmptyTree))
-          case q"case class $className[..$tps](..$paramDecls)" if (correctTypeName(className)) =>
-            Some((caseClassTermParams(paramDecls, tps, a), EmptyTree))
+          case q"case class $className[..$tps](..$paramDecls)" if correctTypeName(className) =>
+            Some((constructTermParams(paramDecls, tps, a), EmptyTree))
           case _ => None
         }.headOption getOrElse {
           // Could not find declaration. Deconstruct the type directly
@@ -70,7 +70,6 @@ class ContextualMacro(val c: whitebox.Context) {
           }
         }
       }   /*_*/
-
     case expr => c.abort(c.enclosingPosition,
       s"Expected Type Param: type declaration (e.g. type Foo = (Bar, Baz)). Got $expr")
   }
@@ -78,61 +77,60 @@ class ContextualMacro(val c: whitebox.Context) {
   /**
    * Constructs the declarations of the parameters.
    */
-  def constructTermParams(params: List[Tree],
-      tparams: List[Tree],
-      targs: List[Tree],
-      formatName: String => String = lowerCamelFormat) = {
-    lazy val paramsAndArgs = tparams zip targs
-
-    def construct(typeName: TypeName) = {
-      val typeNameString = typeName.decodedName.toString
-      def noSubstitute = (formatName(typeNameString), typeName)
-
-      // Check if the type name is one of the environment's type params. If so,
-      // use the name of the corresponding argument, unless the argument is a "skip"
-      // command (denoted by `~>`). Otherwise, use the type's name.
-      val (paramName, resultType) = paramsAndArgs.find { case (tparam: TypeDef, _) =>
-        tparam.name.decodedName.toString == typeNameString
-      }.map {
-        case (_, Ident(targ: TypeName)) =>
-          val targName = targ.decodedName.toString
-          val skipName = weakTypeOf[~>].typeSymbol.name.decodedName.toString
-          if (targName == skipName) noSubstitute
-          else (formatName(targName), targ)
-      } getOrElse noSubstitute
-
-      val termParam = TermName(paramName)
-      (termParam, resultType)
-    }
+  def constructTermParams(params: List[Tree], tparams: List[Tree], targs: List[Tree]) = {
+    implicit lazy val paramsAndArgs: List[(Tree, Tree)] = tparams zip targs
 
     params map {
       case Ident(typeName: TypeName) =>
-        val (termParam, resultType) = construct(typeName)
-        q"$termParam: $resultType"
-      case tq"$tc[$tparam]" => tparam match {
-        case Ident(name: TypeName) =>
-          val (term @ TermName(paramName), resultType) = construct(name)
-          val tcName = lowerCamelFormat(name.decodedName.toString)
-          val tcTerm = TermName(s"${tcName}Of${paramName.capitalize}")
-          q"$tcTerm: $tc[$resultType]"
-      }
+        val (paramName, resultType) = substituteTArgs(typeName)
+        q"$paramName: $resultType"
+
+      // If the context is a named declaration (i.e. from a case class),
+      // ignore the generated parameter name and reused the declared one.
+      case q"$mod val $param: ${Ident(name: TypeName)}" =>
+        val (_, resultType) = substituteTArgs(name)
+        q"$param: $resultType"
+
+      // If the parameter type is itself a type constructor, perform
+      // substitutions on its own type parameters.
+      case tq"$tc[..$tcParams]" =>
+        val Ident(tcTypeName: TypeName) = tc
+        val newTCParams = tcParams.map {
+          case Ident(name: TypeName) => substituteTArgs(name)._2
+        }
+        val tcName = lowerCamelFormat(tcTypeName.decodedName.toString)
+        val tcParamNames = newTCParams.map { _.decodedName.toString }
+        val tcTerm = TermName(s"${tcName}Of${tcParamNames.mkString}")
+        q"$tcTerm: $tc[..$newTCParams]"
+
+      case q"$mod val $tcDecl: $tc[..$tcTParams]" =>
+        val newTCParams = tcTParams.map {
+          case Ident(name: TypeName) => substituteTArgs(name)._2
+        }
+        q"$tcDecl: $tc[..$newTCParams]"
       case expr => error(expr, "Invalid param format")
     }
   }
 
-  def caseClassTermParams(paramDecls: List[Tree], tparams: List[Tree], targs: List[Tree]) = {
-    val params = paramDecls.map { case decl: ValDef => decl.tpt }
-    constructTermParams(params, tparams, targs, { targName =>
-      paramDecls.find { case decl: ValDef => decl.tpt match {
-        case Ident(tparam: TypeName) => tparam.decodedName.toString == targName
-        case tq"$typeCons[$tparam]" => tparam match { case ident: Ident =>
-          ident.name.decodedName.toString == targName
-        }
-        case expr => error(expr, "Invalid param format")
-      }} map {
-        case decl: ValDef => decl.name.decodedName.toString
-      } getOrElse(lowerCamelFormat(targName))
-    })
+  def substituteTArgs(typeName: TypeName)(implicit
+      paramsAndArgs: List[(Tree, Tree)]) = {
+    val typeNameString = typeName.decodedName.toString
+    def noSubstitute = (lowerCamelFormat(typeNameString), typeName)
+
+    // Check if the type name is one of the environment's type params. If so,
+    // use the name of the corresponding argument, unless the argument is a "skip"
+    // command (denoted by `~>`). Otherwise, use the type's name.
+    val (paramName, resultType) = paramsAndArgs.find { case (tparam: TypeDef, _) =>
+      tparam.name.decodedName.toString == typeNameString
+    }.map {
+      case (_, Ident(targ: TypeName)) =>
+        val targName = targ.decodedName.toString
+        val skipName = weakTypeOf[~>].typeSymbol.name.decodedName.toString
+        if (targName == skipName) noSubstitute
+        else (lowerCamelFormat(targName), targ)
+    } getOrElse noSubstitute
+
+    (TermName(paramName), resultType)
   }
 
   def constructReturnType: (Tree, Tree) => Tree = {
