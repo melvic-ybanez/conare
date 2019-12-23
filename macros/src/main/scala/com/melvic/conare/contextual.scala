@@ -55,19 +55,7 @@ class ContextualMacro(val c: whitebox.Context) {
           case q"type $typeName[..$tps] = (..$params)" if correctTypeName(typeName) =>
             Some((constructTermParams(params, tps, a), EmptyTree))
           case q"case class $className[..$tps](..$paramDecls)" if (correctTypeName(className)) =>
-            val params = paramDecls.map { case decl: ValDef => decl.tpt }
-            val newParamDecls = constructTermParams(params, tps, a, { targName =>
-              paramDecls.find { case decl: ValDef => decl.tpt match {
-                case Ident(tparam: TypeName) => tparam.decodedName.toString == targName
-                case tq"$typeCons[$tparam]" => tparam match { case ident: Ident =>
-                  ident.name.decodedName.toString == targName
-                }
-                case expr => error(expr, "Invalid param format")
-              }} map {
-                case decl: ValDef => decl.name.decodedName.toString
-              } getOrElse(lowerCamelFormat(targName))
-            })
-            Some((newParamDecls, EmptyTree))
+            Some((caseClassTermParams(paramDecls, tps, a), EmptyTree))
           case _ => None
         }.headOption getOrElse {
           // Could not find declaration. Deconstruct the type directly
@@ -132,6 +120,21 @@ class ContextualMacro(val c: whitebox.Context) {
     }
   }
 
+  def caseClassTermParams(paramDecls: List[Tree], tparams: List[Tree], targs: List[Tree]) = {
+    val params = paramDecls.map { case decl: ValDef => decl.tpt }
+    constructTermParams(params, tparams, targs, { targName =>
+      paramDecls.find { case decl: ValDef => decl.tpt match {
+        case Ident(tparam: TypeName) => tparam.decodedName.toString == targName
+        case tq"$typeCons[$tparam]" => tparam match { case ident: Ident =>
+          ident.name.decodedName.toString == targName
+        }
+        case expr => error(expr, "Invalid param format")
+      }} map {
+        case decl: ValDef => decl.name.decodedName.toString
+      } getOrElse(lowerCamelFormat(targName))
+    })
+  }
+
   def constructReturnType: (Tree, Tree) => Tree = {
     case (EmptyTree, ret) => ret
     case (envRet, ret) if ret.isEmpty => envRet
@@ -146,6 +149,6 @@ class ContextualMacro(val c: whitebox.Context) {
   def lowerCamelFormat(paramName: String) =
     paramName.head.toLower + paramName.tail
 
-  def error(expr: Tree, prefixMessage: String) =
-    c.abort(c.enclosingPosition, s"$prefixMessage: ${showRaw(expr)}")
+  def error(expr: Tree, message: String) =
+    c.abort(c.enclosingPosition, s"$message: ${showRaw(expr)}")
 }
